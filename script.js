@@ -30,7 +30,8 @@
     particles = Array.from({ length: count }, (_, i) => {
       const r = random(5, 15) * scale;
       const angle = random(0, Math.PI * 2), speed = random(15, 32);
-      return { x: random(r, width - r), y: random(r, height - r), r,
+      return { x: random(r, width - r), y: random(r, height - r), r, baseRadius: r,
+        phase: random(0, Math.PI * 2), cycle: random(35, 65),
         vx: Math.cos(angle) * speed, vy: Math.sin(angle) * speed,
         color: palette[i % palette.length], turnIn: random(.5, 5) };
     });
@@ -54,6 +55,9 @@
       }
     }
     particles.forEach(p => {
+      // Each particle grows and recedes on its own slow, bounded cycle.
+      p.phase = (p.phase + dt * Math.PI * 2 / p.cycle) % (Math.PI * 2);
+      p.r = p.baseRadius * (1 + .12 * Math.sin(p.phase));
       p.turnIn -= dt;
       if (p.turnIn <= 0) {
         const angle = random(-.65, .65), c = Math.cos(angle), s = Math.sin(angle);
