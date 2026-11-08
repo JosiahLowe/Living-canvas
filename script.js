@@ -3,7 +3,9 @@
   const canvas = document.querySelector('#canvas');
   const ctx = canvas.getContext('2d');
   const pauseButton = document.querySelector('#pause');
-  const palette = ['#b8a0ed', '#ed9da6', '#edbd83', '#91c9ba', '#8caee7', '#cf9ed8', '#d5d998'];
+  const palette = [260, 350, 35, 160, 215, 290, 65];
+  const timeSlider = document.querySelector('#time');
+  let lifeTime = 0, timeOffset = 0;
   const count = 50;
   const step = 1 / 60;
   let width = 0, height = 0, particles = [], paused = false;
@@ -26,20 +28,39 @@
   }
 
   function reset() {
+    lifeTime = 0; timeOffset = 0; timeSlider.value = '0';
+    timeSlider.setAttribute('aria-valuetext', 'Present');
     const scale = Math.min(1, Math.max(.65, width / 800));
     particles = Array.from({ length: count }, (_, i) => {
       const r = random(5, 15) * scale;
       const angle = random(0, Math.PI * 2), speed = random(15, 32);
       return { x: random(r, width - r), y: random(r, height - r), r, baseRadius: r,
-        phase: random(0, Math.PI * 2), cycle: random(35, 65),
+        birthOffset: (i + .5) / count, cycle: random(45, 75),
         vx: Math.cos(angle) * speed, vy: Math.sin(angle) * speed,
-        color: palette[i % palette.length], turnIn: random(.5, 5) };
+        hue: palette[i % palette.length], turnIn: random(.5, 5) };
     });
     accumulated = 0;
+    updateLife();
     draw();
   }
 
+  function updateLife() {
+    particles.forEach(p => {
+      p.age = ((p.birthOffset + (lifeTime + timeOffset) / p.cycle) % 1 + 1) % 1;
+      const fullness = Math.sin(Math.PI * p.age);
+      p.r = p.baseRadius * fullness;
+      p.pull = fullness * fullness;
+      p.targetSpeed = 42 - 36 * p.age;
+      p.color = `hsl(${p.hue}, ${12 + 55 * p.pull}%, ${35 + 35 * fullness}%)`;
+      p.opacity = .12 + .78 * fullness;
+      p.x = Math.max(p.r, Math.min(width - p.r, p.x));
+      p.y = Math.max(p.r, Math.min(height - p.r, p.y));
+    });
+  }
+
   function update(dt) {
+    lifeTime += dt;
+    updateLife();
     const range = Math.min(150, width * .32);
     for (let i = 0; i < count; i++) {
       for (let j = i + 1; j < count; j++) {
@@ -51,13 +72,13 @@
         const core = a.r + b.r + 10;
         const force = distance < core ? -35 * (1 - distance / core) : 3 * (1 - distance / range);
         const fx = dx / distance * force * dt, fy = dy / distance * force * dt;
-        a.vx += fx; a.vy += fy; b.vx -= fx; b.vy -= fy;
+        const pullA = distance < core ? 1 : a.pull;
+        const pullB = distance < core ? 1 : b.pull;
+        a.vx += fx * pullB; a.vy += fy * pullB;
+        b.vx -= fx * pullA; b.vy -= fy * pullA;
       }
     }
     particles.forEach(p => {
-      // Each particle grows and recedes on its own slow, bounded cycle.
-      p.phase = (p.phase + dt * Math.PI * 2 / p.cycle) % (Math.PI * 2);
-      p.r = p.baseRadius * (1 + .12 * Math.sin(p.phase));
       p.turnIn -= dt;
       if (p.turnIn <= 0) {
         const angle = random(-.65, .65), c = Math.cos(angle), s = Math.sin(angle);
@@ -67,7 +88,7 @@
       }
       const speed = Math.hypot(p.vx, p.vy);
       if (speed > .001) {
-        const target = Math.max(12, Math.min(38, speed));
+        const target = p.targetSpeed;
         const factor = 1 + (target / speed - 1) * .025;
         p.vx *= factor; p.vy *= factor;
       }
@@ -84,7 +105,7 @@
     particles.forEach(p => {
       ctx.beginPath(); ctx.arc(p.x, p.y, p.r, 0, Math.PI * 2);
       ctx.fillStyle = p.color; ctx.shadowColor = p.color; ctx.shadowBlur = 16;
-      ctx.globalAlpha = .85; ctx.fill();
+      ctx.globalAlpha = p.opacity; ctx.fill();
       ctx.shadowBlur = 0; ctx.globalAlpha = 1;
     });
   }
@@ -110,6 +131,12 @@
     pauseButton.querySelector('span').textContent = paused ? 'Resume' : 'Pause';
     document.querySelector('#pause-icon').setAttribute('d', paused ? 'M7 4l8 6-8 6Z' : 'M7 5v10M13 5v10');
     syncAnimation();
+  });
+  timeSlider.addEventListener('input', () => {
+    timeOffset = Number(timeSlider.value);
+    timeSlider.setAttribute('aria-valuetext', `${Math.abs(timeOffset).toFixed(1)} seconds ${timeOffset < 0 ? 'earlier' : 'later'}`);
+    updateLife();
+    draw();
   });
   document.querySelector('#reset').addEventListener('click', reset);
   window.addEventListener('resize', resize);
