@@ -14,6 +14,53 @@
   let lastTime = 0, accumulated = 0, frameId = null;
   const random = (min, max) => min + Math.random() * (max - min);
 
+  let audioContext = null, masterGain = null, soundEnabled = false, voices = 0;
+  const soundButton = document.querySelector('#sound');
+  document.querySelector('#toggle-controls').addEventListener('click', event => {
+    const panel = document.querySelector('#control-panel');
+    panel.hidden = !panel.hidden;
+    event.currentTarget.setAttribute('aria-expanded', String(!panel.hidden));
+    event.currentTarget.setAttribute('aria-label', panel.hidden ? 'Show controls' : 'Hide controls');
+  });
+  soundButton.addEventListener('click', async () => {
+    try {
+      if (!audioContext) {
+        const Audio = window.AudioContext || window.webkitAudioContext;
+        audioContext = new Audio();
+        masterGain = audioContext.createGain(); masterGain.gain.value = 0;
+        const limiter = audioContext.createDynamicsCompressor();
+        masterGain.connect(limiter); limiter.connect(audioContext.destination);
+      }
+      soundEnabled = !soundEnabled;
+      masterGain.gain.setTargetAtTime(soundEnabled ? .45 : 0, audioContext.currentTime, .02);
+      soundButton.setAttribute('aria-pressed', String(soundEnabled));
+      soundButton.textContent = soundEnabled ? 'Sound on' : 'Sound off';
+      if (soundEnabled) await audioContext.resume();
+    } catch {
+      soundEnabled = false;
+      if (masterGain) masterGain.gain.value = 0;
+      soundButton.textContent = 'No audio'; soundButton.disabled = true;
+    }
+  });
+
+  function impactSound(age, impact, wall = false) {
+    if (!soundEnabled || paused || document.hidden || audioContext.state !== 'running' || voices >= 24) return;
+    const now = audioContext.currentTime;
+    const oscillator = audioContext.createOscillator(), gain = audioContext.createGain();
+    // Volume follows growth: muted at birth, strongest at midlife, fading in old age.
+    const volume = (.015 + .10 * Math.sin(Math.PI * age)) * Math.min(1, impact / 45);
+    oscillator.type = 'sine';
+    oscillator.frequency.setValueAtTime((wall ? 160 : 300) + (1 - age) * 180, now);
+    oscillator.frequency.exponentialRampToValueAtTime(wall ? 75 : 160, now + .12);
+    gain.gain.setValueAtTime(0, now);
+    gain.gain.linearRampToValueAtTime(volume, now + .004);
+    gain.gain.exponentialRampToValueAtTime(.0001, now + .16);
+    oscillator.connect(gain); gain.connect(masterGain);
+    voices++;
+    oscillator.onended = () => { voices--; oscillator.disconnect(); gain.disconnect(); };
+    oscillator.start(now); oscillator.stop(now + .18);
+  }
+
   function resize() {
     const oldWidth = width, oldHeight = height;
     width = window.innerWidth;
@@ -137,20 +184,23 @@
     b.y += ny * overlap * invB / invTotal;
     const closingSpeed = (b.vx - a.vx) * nx + (b.vy - a.vy) * ny;
     if (closingSpeed >= 0) return;
+    impactSound((a.age + b.age) / 2, -closingSpeed);
     const impulse = -(1 + .95) * closingSpeed / invTotal;
     a.vx -= impulse * nx * invA; a.vy -= impulse * ny * invA;
     b.vx += impulse * nx * invB; b.vy += impulse * ny * invB;
   }
 
   function wallImpact(p, x, y, nx, ny, impact) {
-    if (p === gesture?.particle || p.wallCooldown > 0 || impact < 5) return;
+    if (p === gesture?.particle || impact <= 0) return;
+    impactSound(p.age, impact, true);
+    if (p.wallCooldown > 0 || impact < 5) return;
     p.wallCooldown = .4;
     ripples.push({ x, y, age: 0 });
     particles.forEach(other => {
       if (other === p || other === gesture?.particle) return;
       const distance = Math.hypot(other.x - x, other.y - y);
-      if (distance >= 130) return;
-      const kick = Math.min(22, impact * .6) * (1 - distance / 130);
+      if (distance >= 180) return;
+      const kick = Math.min(55, impact * 1.5) * (1 - distance / 180);
       other.vx += nx * kick; other.vy += ny * kick;
     });
   }
@@ -158,19 +208,19 @@
   function bounceEdges(p) {
     if (p.x < p.r) {
       wallImpact(p, 0, p.y, 1, 0, -p.vx);
-      p.x = p.r; p.vx = Math.abs(p.vx);
+      p.x = p.r; p.vx = Math.min(80, Math.abs(p.vx) * 1.2);
     }
     if (p.x > width - p.r) {
       wallImpact(p, width, p.y, -1, 0, p.vx);
-      p.x = width - p.r; p.vx = -Math.abs(p.vx);
+      p.x = width - p.r; p.vx = -Math.min(80, Math.abs(p.vx) * 1.2);
     }
     if (p.y < p.r) {
       wallImpact(p, p.x, 0, 0, 1, -p.vy);
-      p.y = p.r; p.vy = Math.abs(p.vy);
+      p.y = p.r; p.vy = Math.min(80, Math.abs(p.vy) * 1.2);
     }
     if (p.y > height - p.r) {
       wallImpact(p, p.x, height, 0, -1, p.vy);
-      p.y = height - p.r; p.vy = -Math.abs(p.vy);
+      p.y = height - p.r; p.vy = -Math.min(80, Math.abs(p.vy) * 1.2);
     }
   }
 
