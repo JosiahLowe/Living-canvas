@@ -35,11 +35,11 @@
     timeSlider.setAttribute('aria-valuetext', '1× speed');
     const scale = Math.min(1, Math.max(.65, width / 800));
     particles = Array.from({ length: count }, (_, i) => {
-      const r = random(5, 15) * scale * 1.25;
+      const r = random(5, 15) * scale * 1.75;
       const angle = random(0, Math.PI * 2), speed = random(9, 20);
       return { x: random(r, width - r), y: random(r, height - r), r, baseRadius: r,
         birthOffset: (i + .5) / count, cycle: random(90, 150),
-        polarity: i % 2 === 0 ? 1 : -1,
+        polarity: i % 2 === 0 ? 1 : -1, wallCooldown: 0,
         vx: Math.cos(angle) * speed, vy: Math.sin(angle) * speed,
         hue: palette[i % palette.length], turnIn: random(.5, 5) };
     });
@@ -54,6 +54,9 @@
       const fullness = Math.sin(Math.PI * p.age);
       p.r = p.baseRadius * fullness;
       p.pull = fullness * fullness;
+      // After midlife, an outward field gradually replaces the fading pull.
+      const oldAge = Math.max(0, (p.age - .5) * 2);
+      p.repulsion = 36 * oldAge * oldAge * (3 - 2 * oldAge);
       p.targetSpeed = 26 - 21 * p.age;
       p.color = `hsl(${p.hue}, ${12 + 55 * p.pull}%, ${35 + 35 * fullness}%)`;
       p.opacity = .12 + .78 * fullness;
@@ -63,7 +66,7 @@
   }
 
   function update(dt) {
-    lifeTime += dt;
+    lifeTime += dt * simulationSpeed;
     updateLife();
     const range = Math.min(420, width * .9);
     for (let i = 0; i < count; i++) {
@@ -77,15 +80,18 @@
         const spacing = (a.r + b.r) * 2 + 8;
         // Leave breathing room before contact instead of pinning clusters solid.
         const pressure = 65 * Math.max(0, 1 - distance / spacing);
-        const field = 28 * a.polarity * b.polarity * (1 - distance / range);
+        const alignment = a.polarity * b.polarity;
+        const falloff = 1 - distance / range;
+        const field = (alignment > 0 ? 10 : -28) * falloff;
         const fx = dx / distance * dt, fy = dy / distance * dt;
-        const forceA = field * b.pull - pressure;
-        const forceB = field * a.pull - pressure;
+        const forceA = field * b.pull - b.repulsion * falloff - pressure;
+        const forceB = field * a.pull - a.repulsion * falloff - pressure;
         if (a !== gesture?.particle) { a.vx += fx * forceA; a.vy += fy * forceA; }
         if (b !== gesture?.particle) { b.vx -= fx * forceB; b.vy -= fy * forceB; }
       }
     }
     particles.forEach(p => {
+      p.wallCooldown = Math.max(0, p.wallCooldown - dt);
       if (p === gesture?.particle) return;
       p.turnIn -= dt;
       if (p.turnIn <= 0) {
@@ -136,11 +142,36 @@
     b.vx += impulse * nx * invB; b.vy += impulse * ny * invB;
   }
 
+  function wallImpact(p, x, y, nx, ny, impact) {
+    if (p === gesture?.particle || p.wallCooldown > 0 || impact < 5) return;
+    p.wallCooldown = .4;
+    ripples.push({ x, y, age: 0 });
+    particles.forEach(other => {
+      if (other === p || other === gesture?.particle) return;
+      const distance = Math.hypot(other.x - x, other.y - y);
+      if (distance >= 130) return;
+      const kick = Math.min(22, impact * .6) * (1 - distance / 130);
+      other.vx += nx * kick; other.vy += ny * kick;
+    });
+  }
+
   function bounceEdges(p) {
-      if (p.x < p.r) { p.x = p.r; p.vx = Math.abs(p.vx); }
-      if (p.x > width - p.r) { p.x = width - p.r; p.vx = -Math.abs(p.vx); }
-      if (p.y < p.r) { p.y = p.r; p.vy = Math.abs(p.vy); }
-      if (p.y > height - p.r) { p.y = height - p.r; p.vy = -Math.abs(p.vy); }
+    if (p.x < p.r) {
+      wallImpact(p, 0, p.y, 1, 0, -p.vx);
+      p.x = p.r; p.vx = Math.abs(p.vx);
+    }
+    if (p.x > width - p.r) {
+      wallImpact(p, width, p.y, -1, 0, p.vx);
+      p.x = width - p.r; p.vx = -Math.abs(p.vx);
+    }
+    if (p.y < p.r) {
+      wallImpact(p, p.x, 0, 0, 1, -p.vy);
+      p.y = p.r; p.vy = Math.abs(p.vy);
+    }
+    if (p.y > height - p.r) {
+      wallImpact(p, p.x, height, 0, -1, p.vy);
+      p.y = height - p.r; p.vy = -Math.abs(p.vy);
+    }
   }
 
   function draw() {
@@ -239,7 +270,7 @@
   timeSlider.addEventListener('input', () => {
     // Logarithmic mapping gives equal room to slower and faster time.
     simulationSpeed = Math.pow(2, Number(timeSlider.value));
-    timeSlider.setAttribute('aria-valuetext', `${Number(simulationSpeed.toFixed(2))}× speed`);
+    timeSlider.setAttribute('aria-valuetext', `${Number(simulationSpeed.toFixed(2))}× movement, ${Number((simulationSpeed ** 2).toFixed(2))}× life cycles`);
   });
   document.querySelector('#reset').addEventListener('click', reset);
   window.addEventListener('resize', resize);
