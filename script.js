@@ -7,7 +7,7 @@
   const timeSlider = document.querySelector('#time');
   let lifeTime = 0, simulationSpeed = 1;
   const count = 50;
-  const step = 1 / 60;
+  const step = 1 / 120;
   let width = 0, height = 0, particles = [], paused = false;
   let lastTime = 0, accumulated = 0, frameId = null;
   const random = (min, max) => min + Math.random() * (max - min);
@@ -62,7 +62,7 @@
   function update(dt) {
     lifeTime += dt;
     updateLife();
-    const range = Math.min(280, width * .6);
+    const range = Math.min(420, width * .9);
     for (let i = 0; i < count; i++) {
       for (let j = i + 1; j < count; j++) {
         const a = particles[i], b = particles[j];
@@ -70,13 +70,11 @@
         const distance = Math.hypot(dx, dy);
         if (distance < .01 || distance > range) continue;
         // Matching groups attract; opposite groups repel over the same range.
-        // Every particle also pushes back at close range to prevent collapse.
-        const core = a.r + b.r + 10;
-        const field = 14 * a.polarity * b.polarity * (1 - distance / range);
-        const repulsion = distance < core ? 90 * (1 - distance / core) : 0;
+        // Solid contact is handled separately from the long-range field.
+        const field = 70 * a.polarity * b.polarity * (1 - distance / range);
         const fx = dx / distance * dt, fy = dy / distance * dt;
-        const forceA = field * b.pull - repulsion;
-        const forceB = field * a.pull - repulsion;
+        const forceA = field * b.pull;
+        const forceB = field * a.pull;
         a.vx += fx * forceA; a.vy += fy * forceA;
         b.vx -= fx * forceB; b.vy -= fy * forceB;
       }
@@ -92,15 +90,48 @@
       const speed = Math.hypot(p.vx, p.vy);
       if (speed > .001) {
         const target = p.targetSpeed;
-        const factor = 1 + (target / speed - 1) * .025;
+        const factor = Math.min(120 / speed, 1 + (target / speed - 1) * .004);
         p.vx *= factor; p.vy *= factor;
       }
       p.x += p.vx * dt; p.y += p.vy * dt;
+      bounceEdges(p);
+    });
+    // Multiple passes resolve contacts within small clusters.
+    for (let pass = 0; pass < 4; pass++) {
+      for (let i = 0; i < count; i++) {
+        for (let j = i + 1; j < count; j++) resolveCollision(particles[i], particles[j]);
+      }
+      particles.forEach(bounceEdges);
+    }
+  }
+
+  function resolveCollision(a, b) {
+    const dx = b.x - a.x, dy = b.y - a.y;
+    const distance = Math.hypot(dx, dy), contact = a.r + b.r;
+    if (distance >= contact || contact < .01) return;
+    const nx = distance > .00001 ? dx / distance : 1;
+    const ny = distance > .00001 ? dy / distance : 0;
+    // Larger particles carry more mass; the floor stabilizes near-zero sizes.
+    const invA = 1 / Math.max(4, a.r * a.r);
+    const invB = 1 / Math.max(4, b.r * b.r);
+    const invTotal = invA + invB;
+    const overlap = contact - distance + .001;
+    a.x -= nx * overlap * invA / invTotal;
+    a.y -= ny * overlap * invA / invTotal;
+    b.x += nx * overlap * invB / invTotal;
+    b.y += ny * overlap * invB / invTotal;
+    const closingSpeed = (b.vx - a.vx) * nx + (b.vy - a.vy) * ny;
+    if (closingSpeed >= 0) return;
+    const impulse = -(1 + .95) * closingSpeed / invTotal;
+    a.vx -= impulse * nx * invA; a.vy -= impulse * ny * invA;
+    b.vx += impulse * nx * invB; b.vy += impulse * ny * invB;
+  }
+
+  function bounceEdges(p) {
       if (p.x < p.r) { p.x = p.r; p.vx = Math.abs(p.vx); }
       if (p.x > width - p.r) { p.x = width - p.r; p.vx = -Math.abs(p.vx); }
       if (p.y < p.r) { p.y = p.r; p.vy = Math.abs(p.vy); }
       if (p.y > height - p.r) { p.y = height - p.r; p.vy = -Math.abs(p.vy); }
-    });
   }
 
   function draw() {
