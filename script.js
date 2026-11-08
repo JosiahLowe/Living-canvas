@@ -5,7 +5,7 @@
   const pauseButton = document.querySelector('#pause');
   const palette = [260, 350, 35, 160, 215, 290, 65];
   const timeSlider = document.querySelector('#time');
-  let lifeTime = 0, timeOffset = 0;
+  let lifeTime = 0, simulationSpeed = 1;
   const count = 50;
   const step = 1 / 60;
   let width = 0, height = 0, particles = [], paused = false;
@@ -28,14 +28,15 @@
   }
 
   function reset() {
-    lifeTime = 0; timeOffset = 0; timeSlider.value = '0';
-    timeSlider.setAttribute('aria-valuetext', 'Present');
+    lifeTime = 0; simulationSpeed = 1; timeSlider.value = '0';
+    timeSlider.setAttribute('aria-valuetext', '1× speed');
     const scale = Math.min(1, Math.max(.65, width / 800));
     particles = Array.from({ length: count }, (_, i) => {
-      const r = random(5, 15) * scale;
+      const r = random(5, 15) * scale * 1.25;
       const angle = random(0, Math.PI * 2), speed = random(15, 32);
       return { x: random(r, width - r), y: random(r, height - r), r, baseRadius: r,
-        birthOffset: (i + .5) / count, cycle: random(45, 75),
+        birthOffset: (i + .5) / count, cycle: random(90, 150),
+        polarity: i % 2 === 0 ? 1 : -1,
         vx: Math.cos(angle) * speed, vy: Math.sin(angle) * speed,
         hue: palette[i % palette.length], turnIn: random(.5, 5) };
     });
@@ -46,7 +47,7 @@
 
   function updateLife() {
     particles.forEach(p => {
-      p.age = ((p.birthOffset + (lifeTime + timeOffset) / p.cycle) % 1 + 1) % 1;
+      p.age = ((p.birthOffset + lifeTime / p.cycle) % 1 + 1) % 1;
       const fullness = Math.sin(Math.PI * p.age);
       p.r = p.baseRadius * fullness;
       p.pull = fullness * fullness;
@@ -61,21 +62,23 @@
   function update(dt) {
     lifeTime += dt;
     updateLife();
-    const range = Math.min(150, width * .32);
+    const range = Math.min(280, width * .6);
     for (let i = 0; i < count; i++) {
       for (let j = i + 1; j < count; j++) {
         const a = particles[i], b = particles[j];
         const dx = b.x - a.x, dy = b.y - a.y;
         const distance = Math.hypot(dx, dy);
         if (distance < .01 || distance > range) continue;
-        // A soft repulsive core keeps attraction from collapsing into a clump.
+        // Matching groups attract; opposite groups repel over the same range.
+        // Every particle also pushes back at close range to prevent collapse.
         const core = a.r + b.r + 10;
-        const force = distance < core ? -35 * (1 - distance / core) : 3 * (1 - distance / range);
-        const fx = dx / distance * force * dt, fy = dy / distance * force * dt;
-        const pullA = distance < core ? 1 : a.pull;
-        const pullB = distance < core ? 1 : b.pull;
-        a.vx += fx * pullB; a.vy += fy * pullB;
-        b.vx -= fx * pullA; b.vy -= fy * pullA;
+        const field = 14 * a.polarity * b.polarity * (1 - distance / range);
+        const repulsion = distance < core ? 90 * (1 - distance / core) : 0;
+        const fx = dx / distance * dt, fy = dy / distance * dt;
+        const forceA = field * b.pull - repulsion;
+        const forceB = field * a.pull - repulsion;
+        a.vx += fx * forceA; a.vy += fy * forceA;
+        b.vx -= fx * forceB; b.vy -= fy * forceB;
       }
     }
     particles.forEach(p => {
@@ -113,7 +116,7 @@
   function frame(time) {
     frameId = null;
     if (paused || document.hidden) return;
-    if (lastTime) accumulated += Math.min((time - lastTime) / 1000, .05);
+    if (lastTime) accumulated += Math.min((time - lastTime) / 1000, .05) * simulationSpeed;
     lastTime = time;
     while (accumulated >= step) { update(step); accumulated -= step; }
     draw();
@@ -133,10 +136,9 @@
     syncAnimation();
   });
   timeSlider.addEventListener('input', () => {
-    timeOffset = Number(timeSlider.value);
-    timeSlider.setAttribute('aria-valuetext', `${Math.abs(timeOffset).toFixed(1)} seconds ${timeOffset < 0 ? 'earlier' : 'later'}`);
-    updateLife();
-    draw();
+    // Logarithmic mapping gives equal room to slower and faster time.
+    simulationSpeed = Math.pow(2, Number(timeSlider.value));
+    timeSlider.setAttribute('aria-valuetext', `${Number(simulationSpeed.toFixed(2))}× speed`);
   });
   document.querySelector('#reset').addEventListener('click', reset);
   window.addEventListener('resize', resize);
